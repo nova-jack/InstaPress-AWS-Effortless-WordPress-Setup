@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# Set custom website name and database details
+WEBSITE_NAME="xyz.com"
+DATABASE_NAME="demo" 
+DATABASE_USER="user1" #createuser
+DATABASE_PASSWORD="testdatabase@123" #set_database_password
+DATABSE_ROOT_PASSWORD="Testpassword@123" #set_root_password
+
+# Update and upgrade packages
+sudo apt update
+sudo apt upgrade -y
+
+# Install Apache2
+sudo apt install apache2 -y
+
+# Install MySQL Server and set a root password
+sudo debconf-set-selections <<< 'mysql-server mysql-server/root_password password $DATABSE_ROOT_PASSWORD'
+sudo debconf-set-selections <<< 'mysql-server mysql-server/root_password_again password $DATABSE_ROOT_PASSWORD'
+sudo apt install mysql-server -y
+
+# Install PHP and necessary modules
+sudo apt install php php-mysql libapache2-mod-php php-curl php-gd php-mbstring php-xml php-xmlrpc php-soap php-intl php-zip -y
+
+# Download and configure WordPress
+cd /var/www/
+sudo wget https://wordpress.org/latest.tar.gz
+sudo tar -xzvf latest.tar.gz
+sudo mv wordpress $WEBSITE_NAME
+cd $WEBSITE_NAME
+sudo cp wp-config-sample.php wp-config.php
+
+# Replace WordPress configuration placeholders with custom values
+sudo sed -i "s/database_name_here/$DATABASE_NAME/" wp-config.php
+sudo sed -i "s/username_here/$DATABASE_USER/" wp-config.php
+sudo sed -i "s/password_here/$DATABASE_PASSWORD/" wp-config.php
+sudo sed -i "s/localhost/127.0.0.1/" wp-config.php  # Use 127.0.0.1 for better MySQL compatibility
+
+# Create a MySQL database and user
+echo "CREATE DATABASE $DATABASE_NAME;" | mysql -u root -p"$DATABSE_ROOT_PASSWORD"
+echo "CREATE USER '$DATABASE_USER'@'localhost' IDENTIFIED BY '$DATABASE_PASSWORD';" | mysql -u root -p"$DATABSE_ROOT_PASSWORD"
+echo "GRANT ALL PRIVILEGES ON $DATABASE_NAME.* TO '$DATABASE_USER'@'localhost';" | mysql -u root -p"$DATABSE_ROOT_PASSWORD"
+echo "FLUSH PRIVILEGES;" | mysql -u root -p"$DATABSE_ROOT_PASSWORD"
+
+# Set correct permissions
+sudo chown -R www-data:www-data /var/www/$WEBSITE_NAME
+
+# Restart Apache
+sudo systemctl restart apache2
+
+# Create a virtual host configuration for the custom website name
+echo "<VirtualHost *:80>
+    ServerAdmin webmaster@$WEBSITE_NAME
+    ServerName $WEBSITE_NAME
+    DocumentRoot /var/www/$WEBSITE_NAME
+    ErrorLog \${APACHE_LOG_DIR}/error.log
+    CustomLog \${APACHE_LOG_DIR}/access.log combined
+ 	<Directory /var/www/$WEBSITE_NAME>
+        AllowOverride All
+   	</Directory>
+</VirtualHost>" | sudo tee /etc/apache2/sites-available/$WEBSITE_NAME.conf
+
+# Enable the virtual host
+sudo a2ensite $WEBSITE_NAME.conf
+
+# Restart Apache to apply the changes
+sudo systemctl restart mysql
+sudo systemctl restart apache2
